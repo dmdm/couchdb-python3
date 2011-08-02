@@ -6,6 +6,7 @@
 # This software is licensed as described in the file COPYING, which
 # you should have received as part of this distribution.
 
+from datetime import datetime
 import doctest
 import os
 import os.path
@@ -20,7 +21,6 @@ import urllib.parse
 from couchdb import client, http
 from couchdb.tests import testutil
 http.CACHE_SIZE = 2, 3
-
 
 class ServerTestCase(testutil.TempDatabaseMixin, unittest.TestCase):
 
@@ -48,10 +48,15 @@ class ServerTestCase(testutil.TempDatabaseMixin, unittest.TestCase):
         self.assertTrue(isinstance(version, str))
         config = self.server.config()
         self.assertTrue(isinstance(config, dict))
-        stats = self.server.stats()
-        self.assertTrue(isinstance(stats, dict))
         tasks = self.server.tasks()
         self.assertTrue(isinstance(tasks, list))
+
+    def test_server_stats(self):
+        stats = self.server.stats()
+        self.assertTrue(isinstance(stats, dict))
+        stats = self.server.stats('httpd/requests')
+        self.assertTrue(isinstance(stats, dict))
+        self.assertTrue(len(stats) == 1 and len(stats['httpd']) == 1)
 
     def test_get_db_missing(self):
         self.assertRaises(http.ResourceNotFound,
@@ -471,8 +476,33 @@ class DatabaseTestCase(testutil.TempDatabaseMixin, unittest.TestCase):
         for change in self.db.changes(feed='continuous', heartbeat=100):
             break
 
+    def test_purge(self):
+        doc = {'a': 'b'}
+        self.db['foo'] = doc
+        self.assertEqual(self.db.purge([doc])['purge_seq'], 1)
+
+    def test_json_encoding_error(self):
+        doc = {'now': datetime.now()}
+        self.assertRaises(TypeError, self.db.save, doc)
+
 
 class ViewTestCase(testutil.TempDatabaseMixin, unittest.TestCase):
+
+    def test_row_object(self):
+
+        row = list(self.db.view('_all_docs', keys=['blah']))[0]
+        self.assertEqual(repr(row), "<Row key='blah', error='not_found'>")
+        self.assertEqual(row.id, None)
+        self.assertEqual(row.key, 'blah')
+        self.assertEqual(row.value, None)
+        self.assertEqual(row.error, 'not_found')
+
+        self.db.save({'_id': 'xyz', 'foo': 'bar'})
+        row = list(self.db.view('_all_docs', keys=['xyz']))[0]
+        self.assertEqual(row.id, 'xyz')
+        self.assertEqual(row.key, 'xyz')
+        self.assertEqual(row.value.keys(), ['rev'])
+        self.assertEqual(row.error, None)
 
     def test_view_multi_get(self):
         for i in range(1, 6):
@@ -489,6 +519,16 @@ class ViewTestCase(testutil.TempDatabaseMixin, unittest.TestCase):
         for idx, i in enumerate(list(range(1, 6, 2))):
             self.assertEqual(i, res[idx].key)
 
+    def test_ddoc_info(self):
+        self.db['_design/test'] = {
+            'language': 'javascript',
+            'views': {
+                'test': {'map': 'function(doc) { emit(doc.type, null); }'}
+            }
+        }
+        info = self.db.info('test')
+        self.assertEqual(info['view_index']['compact_running'], False)
+
     def test_view_compaction(self):
         for i in range(1, 6):
             self.db.save({'i': i})
@@ -501,6 +541,27 @@ class ViewTestCase(testutil.TempDatabaseMixin, unittest.TestCase):
 
         self.db.view('test/multi_key')
         self.assertTrue(self.db.compact('test'))
+
+    def test_view_cleanup(self):
+
+        for i in range(1, 6):
+            self.db.save({'i': i})
+
+        self.db['_design/test'] = {
+            'language': 'javascript',
+            'views': {
+                'multi_key': {'map': 'function(doc) { emit(doc.i, null); }'}
+            }
+        }
+        self.db.view('test/multi_key')
+
+        ddoc = self.db['_design/test']
+        ddoc['views'] = {
+            'ids': {'map': 'function(doc) { emit(doc._id, null); }'}
+        }
+        self.db.update([ddoc])
+        self.db.view('test/ids')
+        self.assertTrue(self.db.cleanup())
 
     def test_view_function_objects(self):
         if 'python' not in self.server.config()['query_servers']:
@@ -567,11 +628,110 @@ class ViewTestCase(testutil.TempDatabaseMixin, unittest.TestCase):
         self.assertTrue('id' not in repr(rows[0]))
 
 
+class ShowListTestCase(testutil.TempDatabaseMixin, unittest.TestCase):
+
+    show_func = """
+        function(doc, req) {
+            return {"body": req.id + ":" + (req.query.r || "<default>")};
+        }
+        """
+
+    list_func = """
+        function(head, req) {
+            start({headers: {'Content-Type': 'text/csv'}});
+            if (req.query.include_header) {
+                send('id' + '\\r\\n');
+            }
+            var row;
+            while (row = getRow()) {
+                send(row.id + '\\r\\n');
+            }
+        }
+        """
+
+    design_doc = {'_id': '_design/foo',
+                  'shows': {'bar': show_func},
+                  'views': {'by_id': {'map': "function(doc) {emit(doc._id, null)}"},
+                            'by_name': {'map': "function(doc) {emit(doc.name, null)}"}},
+                  'lists': {'list': list_func}}
+
+    def setUp(self):
+        super(ShowListTestCase, self).setUp()
+        # Workaround for possible bug in CouchDB. Adding a timestamp avoids a
+        # 409 Conflict error when pushing the same design doc that existed in a
+        # now deleted database.
+        design_doc = dict(self.design_doc)
+        design_doc['timestamp'] = time.time()
+        self.db.save(design_doc)
+        self.db.update([{'_id': '1', 'name': 'one'}, {'_id': '2', 'name': 'two'}])
+
+    def test_show_urls(self):
+        self.assertEqual(self.db.show('_design/foo/_show/bar')[1].read(), 'null:<default>')
+        self.assertEqual(self.db.show('foo/bar')[1].read(), 'null:<default>')
+
+    def test_show_docid(self):
+        self.assertEqual(self.db.show('foo/bar')[1].read(), 'null:<default>')
+        self.assertEqual(self.db.show('foo/bar', '1')[1].read(), '1:<default>')
+        self.assertEqual(self.db.show('foo/bar', '2')[1].read(), '2:<default>')
+
+    def test_show_params(self):
+        self.assertEqual(self.db.show('foo/bar', r='abc')[1].read(), 'null:abc')
+
+    def test_list(self):
+        self.assertEqual(self.db.list('foo/list', 'foo/by_id')[1].read(), '1\r\n2\r\n')
+        self.assertEqual(self.db.list('foo/list', 'foo/by_id', include_header='true')[1].read(), 'id\r\n1\r\n2\r\n')
+
+    def test_list_keys(self):
+        self.assertEqual(self.db.list('foo/list', 'foo/by_id', keys=['1'])[1].read(), '1\r\n')
+
+    def test_list_view_params(self):
+        self.assertEqual(self.db.list('foo/list', 'foo/by_name', startkey='o', endkey='p')[1].read(), '1\r\n')
+        self.assertEqual(self.db.list('foo/list', 'foo/by_name', descending=True)[1].read(), '2\r\n1\r\n')
+
+class UpdateHandlerTestCase(testutil.TempDatabaseMixin, unittest.TestCase):
+    update_func = """
+        function(doc, req) {
+          if (!doc) {
+            if (req.id) {
+              return [{_id : req.id}, "new doc"]
+            }
+            return [null, "empty doc"];
+          }
+          doc.name = "hello";
+          return [doc, "hello doc"];
+        }
+    """
+
+    design_doc = {'_id': '_design/foo',
+                  'language': 'javascript',
+                  'updates': {'bar': update_func}}
+
+    def setUp(self):
+        super(UpdateHandlerTestCase, self).setUp()
+        # Workaround for possible bug in CouchDB. Adding a timestamp avoids a
+        # 409 Conflict error when pushing the same design doc that existed in a
+        # now deleted database.
+        design_doc = dict(self.design_doc)
+        design_doc['timestamp'] = time.time()
+        self.db.save(design_doc)
+        self.db.update([{'_id': 'existed', 'name': 'bar'}])
+
+    def test_empty_doc(self):
+        self.assertEqual(self.db.update_doc('foo/bar')[1].read(), 'empty doc')
+
+    def test_new_doc(self):
+        self.assertEqual(self.db.update_doc('foo/bar', 'new')[1].read(), 'new doc')
+
+    def test_update_doc(self):
+        self.assertEqual(self.db.update_doc('foo/bar', 'existed')[1].read(), 'hello doc')
+
 def suite():
     suite = unittest.TestSuite()
     suite.addTest(unittest.makeSuite(ServerTestCase, 'test'))
     suite.addTest(unittest.makeSuite(DatabaseTestCase, 'test'))
     suite.addTest(unittest.makeSuite(ViewTestCase, 'test'))
+    suite.addTest(unittest.makeSuite(ShowListTestCase, 'test'))
+    suite.addTest(unittest.makeSuite(UpdateHandlerTestCase, 'test'))
     suite.addTest(doctest.DocTestSuite(client))
     return suite
 

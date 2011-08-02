@@ -16,10 +16,7 @@ from datetime import datetime
 import errno
 import socket
 import time
-try:
-    from io import StringIO
-except ImportError:
-    from io import StringIO
+from io import StringIO
 import sys
 try:
     from threading import Lock
@@ -105,12 +102,16 @@ class ResponseBody(object):
 
     def close(self):
         while not self.resp.isclosed():
-            self.read(CHUNK_SIZE)
-        self.callback()
+            self.resp.read(CHUNK_SIZE)
+        if self.callback:
+            self.callback()
+            self.callback = None
 
     def __iter__(self):
         assert self.resp.msg.get('transfer-encoding') == 'chunked'
         while True:
+            if self.resp.isclosed():
+                break
             chunksz = int(self.resp.fp.readline().strip(), 16)
             if not chunksz:
                 self.resp.fp.read(2) #crlf
@@ -140,7 +141,7 @@ class Session(object):
         :param cache: an instance with a dict-like interface or None to allow
                       Session to create a dict for caching.
         :param timeout: socket timeout in number of seconds, or `None` for no
-                        timeout
+                        timeout (the default)
         :param retry_delays: list of request retry delays.
         """
         from couchdb import __version__ as VERSION
@@ -183,7 +184,7 @@ class Session(object):
             elif isinstance(body, (dict, list, tuple)):
                 body = json.encode(body).encode('utf-8')
                 headers.setdefault('Content-Type', 'application/json')
-            if isinstance(body, (bytes, str)):
+            if isinstance(body, bytes):
                 headers.setdefault('Content-Length', str(len(body)))
             else:
                 headers['Transfer-Encoding'] = 'chunked'
@@ -213,28 +214,26 @@ class Session(object):
 
         def _try_request():
             try:
-                if conn.sock is None:
-                    conn.connect()
                 conn.putrequest(method, path_query, skip_accept_encoding=True)
                 for header in headers:
                     conn.putheader(header, headers[header])
                 conn.endheaders()
                 if body is not None:
                     if isinstance(body, str):
-                        conn.sock.sendall(body.encode('utf-8'))
+                        conn.send(body.encode('utf-8'))
                     elif isinstance(body, bytes):
-                        conn.sock.sendall(body)
+                        conn.send(body)
                     else: # assume a file-like object and send in chunks
                         while 1:
                             chunk = body.read(CHUNK_SIZE)
                             encoding = getattr(body, 'encoding') or 'utf-8'
                             if not chunk:
                                 break
-                            conn.sock.sendall(b''.join(
+                            conn.send(b''.join(
                                 map(lambda item: item.encode(encoding),
                                     ['%x\r\n' % len(chunk), chunk, '\r\n'])
                             ))
-                        conn.sock.sendall(b'0\r\n\r\n')
+                        conn.send(b'0\r\n\r\n')
                 return conn.getresponse()
             except BadStatusLine as e:
                 # httplib raises a BadStatusLine when it cannot read the status
@@ -331,7 +330,7 @@ class Session(object):
         return status, resp.msg, data
 
     def _clean_cache(self):
-        ls = sorted(iter(self.cache.items()), key=cache_sort)
+        ls = sorted(self.cache.items(), key=cache_sort)
         self.cache = dict(ls[-CACHE_SIZE[0]:])
 
     def _get_connection(self, url):
@@ -348,7 +347,8 @@ class Session(object):
                     cls = HTTPSConnection
                 else:
                     raise ValueError('%s is not a supported scheme' % scheme)
-                conn = cls(host)
+                conn = cls(host, timeout=self.timeout)
+                conn.connect()
         finally:
             self.lock.release()
         return conn
@@ -510,7 +510,7 @@ def urljoin(base, *path, **query):
 
     # build the query string
     params = []
-    for name, value in list(query.items()):
+    for name, value in query.items():
         if type(value) in (list, tuple):
             params.extend([(name, i) for i in value if i is not None])
         elif value is not None:
