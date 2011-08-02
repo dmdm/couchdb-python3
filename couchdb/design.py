@@ -43,7 +43,7 @@ class ViewDefinition(object):
     >>> design_doc = view.get_doc(db)
     >>> design_doc                                          #doctest: +ELLIPSIS
     <Document '_design/tests'@'...' {...}>
-    >>> print design_doc['views']['all']['map']
+    >>> print(design_doc['views']['all']['map'])
     function(doc) {
         emit(doc._id, null);
     }
@@ -58,7 +58,7 @@ class ViewDefinition(object):
     >>> design_doc = view.get_doc(db)
     >>> design_doc                                          #doctest: +ELLIPSIS
     <Document '_design/test2'@'...' {...}>
-    >>> print design_doc['views']['somename']['map']
+    >>> print(design_doc['views']['somename']['map'])
     def my_map(doc):
         yield doc['somekey'], doc['somevalue']
     

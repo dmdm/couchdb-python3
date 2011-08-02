@@ -7,7 +7,7 @@
 # you should have received as part of this distribution.
 
 import doctest
-from StringIO import StringIO
+from io import StringIO
 import unittest
 
 from couchdb import view

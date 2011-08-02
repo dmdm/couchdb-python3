@@ -173,11 +173,11 @@ class CouchTests(testutil.TempDatabaseMixin, unittest.TestCase):
 
     def test_utf8_encoding(self):
         texts = [
-            u"1. Ascii: hello",
-            u"2. Russian: На берегу пустынных волн",
-            u"3. Math: ∮ E⋅da = Q,  n → ∞, ∑ f(i) = ∏ g(i),",
-            u"4. Geek: STARGΛ̊TE SG-1",
-            u"5. Braille: ⡌⠁⠧⠑ ⠼⠁⠒  ⡍⠜⠇⠑⠹⠰⠎ ⡣⠕⠌"
+            "1. Ascii: hello",
+            "2. Russian: На берегу пустынных волн",
+            "3. Math: ∮ E⋅da = Q,  n → ∞, ∑ f(i) = ∏ g(i),",
+            "4. Geek: STARGΛ̊TE SG-1",
+            "5. Braille: ⡌⠁⠧⠑ ⠼⠁⠒  ⡍⠜⠇⠑⠹⠰⠎ ⡣⠕⠌"
         ]
         for idx, text in enumerate(texts):
             self.db[str(idx)] = {'text': text}
@@ -223,7 +223,7 @@ class CouchTests(testutil.TempDatabaseMixin, unittest.TestCase):
             }
         }"""
         rows = iter(self.db.query(query))
-        self.assertEqual(None, rows.next().value)
+        self.assertEqual(None, next(rows).value)
         for idx, row in enumerate(rows):
             self.assertEqual(values[idx + 1], row.key)
 

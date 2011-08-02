@@ -14,20 +14,27 @@ standard library.
 from base64 import b64encode
 from datetime import datetime
 import errno
-from httplib import BadStatusLine, HTTPConnection, HTTPSConnection
 import socket
 import time
 try:
-    from cStringIO import StringIO
+    from io import StringIO
 except ImportError:
-    from StringIO import StringIO
+    from io import StringIO
 import sys
 try:
     from threading import Lock
 except ImportError:
     from dummy_threading import Lock
-import urllib
-from urlparse import urlsplit, urlunsplit
+    
+# this import must be before urllib.* import because we must set to import cache
+# original http package, not our module
+from couchdb.utils import import_stdlib
+BadStatusLine, HTTPConnection, HTTPSConnection = import_stdlib('http.client', 
+                                                               'BadStatusLine', 
+                                                               'HTTPConnection', 
+                                                               'HTTPSConnection')
+import urllib.request, urllib.parse, urllib.error
+from urllib.parse import urlsplit, urlunsplit
 
 from couchdb import json
 
@@ -94,7 +101,7 @@ class ResponseBody(object):
         bytes = self.resp.read(size)
         if size is None or len(bytes) < size:
             self.close()
-        return bytes
+        return bytes.decode('utf-8')
 
     def close(self):
         while not self.resp.isclosed():
@@ -171,14 +178,12 @@ class Session(object):
         if body is None:
             headers.setdefault('Content-Length', '0')
         else:
-            if not isinstance(body, basestring):
-                try:
-                    body = json.encode(body).encode('utf-8')
-                except TypeError:
-                    pass
-                else:
-                    headers.setdefault('Content-Type', 'application/json')
-            if isinstance(body, basestring):
+            if isinstance(body, str):
+                body = body.encode('utf-8')
+            elif isinstance(body, (dict, list, tuple)):
+                body = json.encode(body).encode('utf-8')
+                headers.setdefault('Content-Type', 'application/json')
+            if isinstance(body, (bytes, str)):
                 headers.setdefault('Content-Length', str(len(body)))
             else:
                 headers['Transfer-Encoding'] = 'chunked'
@@ -194,12 +199,12 @@ class Session(object):
             while True:
                 try:
                     return _try_request()
-                except socket.error, e:
+                except socket.error as e:
                     ecode = e.args[0]
                     if ecode not in self.retryable_errors:
                         raise
                     try:
-                        delay = retries.next()
+                        delay = next(retries)
                     except StopIteration:
                         # No more retries, raise last socket error.
                         raise e
@@ -216,17 +221,22 @@ class Session(object):
                 conn.endheaders()
                 if body is not None:
                     if isinstance(body, str):
+                        conn.sock.sendall(body.encode('utf-8'))
+                    elif isinstance(body, bytes):
                         conn.sock.sendall(body)
                     else: # assume a file-like object and send in chunks
                         while 1:
                             chunk = body.read(CHUNK_SIZE)
+                            encoding = getattr(body, 'encoding') or 'utf-8'
                             if not chunk:
                                 break
-                            conn.sock.sendall(('%x\r\n' % len(chunk)) +
-                                              chunk + '\r\n')
-                        conn.sock.sendall('0\r\n\r\n')
+                            conn.sock.sendall(b''.join(
+                                map(lambda item: item.encode(encoding),
+                                    ['%x\r\n' % len(chunk), chunk, '\r\n'])
+                            ))
+                        conn.sock.sendall(b'0\r\n\r\n')
                 return conn.getresponse()
-            except BadStatusLine, e:
+            except BadStatusLine as e:
                 # httplib raises a BadStatusLine when it cannot read the status
                 # line saying, "Presumably, the server closed the connection
                 # before sending a valid response."
@@ -270,14 +280,14 @@ class Session(object):
 
         # Read the full response for empty responses so that the connection is
         # in good state for the next request
-        if method == 'HEAD' or resp.getheader('content-length') == '0' or \
+        if method == 'HEAD' or resp.headers.get('content-length') == '0' or \
                 status < 200 or status in (204, 304):
             resp.read()
             self._return_connection(url, conn)
 
         # Buffer small non-JSON response bodies
-        elif int(resp.getheader('content-length', sys.maxint)) < CHUNK_SIZE:
-            data = resp.read()
+        elif int(resp.headers.get('content-length', sys.maxsize)) < CHUNK_SIZE:
+            data = resp.read().decode('utf-8')
             self._return_connection(url, conn)
 
         # For large or chunked response bodies, do not buffer the full body,
@@ -289,7 +299,7 @@ class Session(object):
 
         # Handle errors
         if status >= 400:
-            ctype = resp.getheader('content-type')
+            ctype = resp.headers.get('content-type')
             if data is not None and 'application/json' in ctype:
                 data = json.decode(data)
                 error = data.get('error'), data.get('reason')
@@ -321,7 +331,7 @@ class Session(object):
         return status, resp.msg, data
 
     def _clean_cache(self):
-        ls = sorted(self.cache.iteritems(), key=cache_sort)
+        ls = sorted(iter(self.cache.items()), key=cache_sort)
         self.cache = dict(ls[-CACHE_SIZE[0]:])
 
     def _get_connection(self, url):
@@ -434,7 +444,7 @@ def extract_credentials(url):
     netloc = parts[1]
     if '@' in netloc:
         creds, netloc = netloc.split('@')
-        credentials = tuple(urllib.unquote(i) for i in creds.split(':'))
+        credentials = tuple(urllib.parse.unquote(i) for i in creds.split(':'))
         parts = list(parts)
         parts[1] = netloc
     else:
@@ -444,24 +454,20 @@ def extract_credentials(url):
 
 def basic_auth(credentials):
     if credentials:
-        return 'Basic %s' % b64encode('%s:%s' % credentials)
+        _ = ('%s:%s' % credentials).encode('utf-8')
+        return 'Basic %s' % b64encode(bytes(_)).decode('utf-8')
 
 
 def quote(string, safe=''):
-    if isinstance(string, unicode):
-        string = string.encode('utf-8')
-    return urllib.quote(string, safe)
-
+    return urllib.parse.quote(string, safe)
 
 def urlencode(data):
     if isinstance(data, dict):
-        data = data.items()
+        data = list(data.items())
     params = []
     for name, value in data:
-        if isinstance(value, unicode):
-            value = value.encode('utf-8')
         params.append((name, value))
-    return urllib.urlencode(params)
+    return urllib.parse.urlencode(params)
 
 
 def urljoin(base, *path, **query):
@@ -504,7 +510,7 @@ def urljoin(base, *path, **query):
 
     # build the query string
     params = []
-    for name, value in query.items():
+    for name, value in list(query.items()):
         if type(value) in (list, tuple):
             params.extend([(name, i) for i in value if i is not None])
         elif value is not None:

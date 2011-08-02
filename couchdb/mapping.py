@@ -32,7 +32,7 @@ subclass, and conveniently access all attributes:
 >>> person = Person.load(db, person.id)
 >>> old_rev = person.rev
 >>> person.name
-u'John Doe'
+'John Doe'
 >>> person.age
 42
 >>> person.added                #doctest: +ELLIPSIS
@@ -50,7 +50,7 @@ updated data:
 
 >>> person = Person.load(db, person.id)
 >>> person.name
-u'John R. Doe'
+'John R. Doe'
 >>> person.rev != old_rev
 True
 
@@ -65,6 +65,7 @@ from decimal import Decimal
 from time import strptime, struct_time
 
 from couchdb.design import ViewDefinition
+import collections
 
 __all__ = ['Mapping', 'Document', 'Field', 'TextField', 'FloatField',
            'IntegerField', 'LongField', 'BooleanField', 'DecimalField',
@@ -94,7 +95,7 @@ class Field(object):
             value = self._to_python(value)
         elif self.default is not None:
             default = self.default
-            if callable(default):
+            if isinstance(default, collections.Callable):
                 default = default()
             value = default
         return value
@@ -105,7 +106,7 @@ class Field(object):
         instance._data[self.name] = value
 
     def _to_python(self, value):
-        return unicode(value)
+        return str(value)
 
     def _to_json(self, value):
         return self._to_python(value)
@@ -118,7 +119,7 @@ class MappingMeta(type):
         for base in bases:
             if hasattr(base, '_fields'):
                 fields.update(base._fields)
-        for attrname, attrval in d.items():
+        for attrname, attrval in list(d.items()):
             if isinstance(attrval, Field):
                 if not attrval.name:
                     attrval.name = attrname
@@ -127,12 +128,10 @@ class MappingMeta(type):
         return type.__new__(cls, name, bases, d)
 
 
-class Mapping(object):
-    __metaclass__ = MappingMeta
-
+class Mapping(object, metaclass=MappingMeta):
     def __init__(self, **values):
         self._data = {}
-        for attrname, field in self._fields.items():
+        for attrname, field in list(self._fields.items()):
             if attrname in values:
                 setattr(self, attrname, values.pop(attrname))
             else:
@@ -165,7 +164,7 @@ class Mapping(object):
     @classmethod
     def build(cls, **d):
         fields = {}
-        for attrname, attrval in d.items():
+        for attrname, attrval in list(d.items()):
             if not attrval.name:
                 attrval.name = attrname
             fields[attrname] = attrval
@@ -199,7 +198,7 @@ class ViewField(object):
     >>> Person.by_name
     <ViewDefinition '_design/people/_view/by_name'>
     
-    >>> print Person.by_name.map_fun
+    >>> print(Person.by_name.map_fun)
     function(doc) {
         emit(doc.name, doc);
     }
@@ -234,7 +233,7 @@ class ViewField(object):
     >>> Person.by_name
     <ViewDefinition '_design/people/_view/by_name'>
 
-    >>> print Person.by_name.map_fun
+    >>> print(Person.by_name.map_fun)
     def by_name(doc):
         yield doc['name'], doc
     """
@@ -285,16 +284,14 @@ class ViewField(object):
 class DocumentMeta(MappingMeta):
 
     def __new__(cls, name, bases, d):
-        for attrname, attrval in d.items():
+        for attrname, attrval in list(d.items()):
             if isinstance(attrval, ViewField):
                 if not attrval.name:
                     attrval.name = attrname
         return MappingMeta.__new__(cls, name, bases, d)
 
 
-class Document(Mapping):
-    __metaclass__ = DocumentMeta
-
+class Document(Mapping, metaclass=DocumentMeta):
     def __init__(self, id=None, **values):
         Mapping.__init__(self, **values)
         if id is not None:
@@ -302,7 +299,7 @@ class Document(Mapping):
 
     def __repr__(self):
         return '<%s %r@%r %r>' % (type(self).__name__, self.id, self.rev,
-                                  dict([(k, v) for k, v in self._data.items()
+                                  dict([(k, v) for k, v in list(self._data.items())
                                         if k not in ('_id', '_rev')]))
 
     def _get_id(self):
@@ -337,7 +334,7 @@ class Document(Mapping):
         ...     author = TextField()
         >>> post = Post(id='foo-bar', title='Foo bar', author='Joe')
         >>> sorted(post.items())
-        [('_id', 'foo-bar'), ('author', u'Joe'), ('title', u'Foo bar')]
+        [('_id', 'foo-bar'), ('author', 'Joe'), ('title', 'Foo bar')]
         
         :return: a list of ``(name, value)`` tuples
         """
@@ -346,7 +343,7 @@ class Document(Mapping):
             retval.append(('_id', self.id))
             if self.rev is not None:
                 retval.append(('_rev', self.rev))
-        for name, value in self._data.items():
+        for name, value in list(self._data.items()):
             if name not in ('_id', '_rev'):
                 retval.append((name, value))
         return retval
@@ -407,7 +404,7 @@ class Document(Mapping):
 
 class TextField(Field):
     """Mapping field for string values."""
-    _to_python = unicode
+    _to_python = str
 
 
 class FloatField(Field):
@@ -422,7 +419,7 @@ class IntegerField(Field):
 
 class LongField(Field):
     """Mapping field for long integer values."""
-    _to_python = long
+    _to_python = int
 
 
 class BooleanField(Field):
@@ -437,7 +434,7 @@ class DecimalField(Field):
         return Decimal(value)
 
     def _to_json(self, value):
-        return unicode(value)
+        return str(value)
 
 
 class DateField(Field):
@@ -453,7 +450,7 @@ class DateField(Field):
     """
 
     def _to_python(self, value):
-        if isinstance(value, basestring):
+        if isinstance(value, str):
             try:
                 value = date(*strptime(value, '%Y-%m-%d')[:3])
             except ValueError:
@@ -479,7 +476,7 @@ class DateTimeField(Field):
     """
 
     def _to_python(self, value):
-        if isinstance(value, basestring):
+        if isinstance(value, str):
             try:
                 value = value.split('.', 1)[0] # strip out microseconds
                 value = value.rstrip('Z') # remove timezone separator
@@ -509,7 +506,7 @@ class TimeField(Field):
     """
 
     def _to_python(self, value):
-        if isinstance(value, basestring):
+        if isinstance(value, str):
             try:
                 value = value.split('.', 1)[0] # strip out microseconds
                 value = time(*strptime(value, '%H:%M:%S')[3:6])
@@ -549,9 +546,9 @@ class DictField(Field):
     <Post ...>
     >>> post = Post.load(db, post.id)
     >>> post.author.name
-    u'John Doe'
+    'John Doe'
     >>> post.author.email
-    u'john@doe.com'
+    'john@doe.com'
     >>> post.extra
     {'foo': 'bar'}
 
@@ -660,25 +657,29 @@ class ListField(Field):
             return str(self.list)
 
         def __unicode__(self):
-            return unicode(self.list)
+            return str(self.list)
 
         def __delitem__(self, index):
-            del self.list[index]
+            if isinstance(index, slice):
+                del self.list[index.start:index.stop]
+            else:
+                del self.list[index]
 
         def __getitem__(self, index):
-            return self.field._to_python(self.list[index])
+            if isinstance(index, slice):
+                res = []
+                for item in self.list[index]:
+                    res.append(self.field._to_python(item))
+                return res
+            else:
+                return self.field._to_python(self.list[index])
 
         def __setitem__(self, index, value):
-            self.list[index] = self.field._to_json(value)
-
-        def __delslice__(self, i, j):
-            del self.list[i:j]
-
-        def __getslice__(self, i, j):
-            return ListField.Proxy(self.list[i:j], self.field)
-
-        def __setslice__(self, i, j, seq):
-            self.list[i:j] = (self.field._to_json(v) for v in seq)
+            if isinstance(index, slice):
+                self.list[index.start:index.stop] = (self.field._to_json(v) 
+                                                     for v in value)
+            else:
+                self.list[index] = self.field._to_json(value)
 
         def __contains__(self, value):
             for item in self.list:
@@ -693,7 +694,7 @@ class ListField(Field):
         def __len__(self):
             return len(self.list)
 
-        def __nonzero__(self):
+        def __bool__(self):
             return bool(self.list)
 
         def append(self, *args, **kwargs):

@@ -134,7 +134,7 @@ class MultipartWriter(object):
         self.fileobj.write(CRLF)
         if headers is None:
             headers = {}
-        if isinstance(content, unicode):
+        if isinstance(content, str):
             ctype, params = parse_header(mimetype)
             if 'charset' in params:
                 content = content.encode(params['charset'])
@@ -148,7 +148,9 @@ class MultipartWriter(object):
         self._write_headers(headers)
         if content:
             # XXX: throw an exception if a boundary appears in the content??
-            self.fileobj.write(content)
+            self.fileobj.write(content.decode()
+                               if isinstance(content, bytes) 
+                               else content)
             self.fileobj.write(CRLF)
 
     def close(self):
@@ -163,16 +165,18 @@ class MultipartWriter(object):
             return '==' + uuid4().hex + '=='
         except ImportError:
             from random import randrange
-            token = randrange(sys.maxint)
-            format = '%%0%dd' % len(repr(sys.maxint - 1))
+            token = randrange(sys.maxsize)
+            format = '%%0%dd' % len(repr(sys.maxsize - 1))
             return '===============' + (format % token) + '=='
 
     def _write_headers(self, headers):
         if headers:
-            for name in sorted(headers.keys()):
+            for name, value in sorted(headers.items()):
                 self.fileobj.write(name)
                 self.fileobj.write(': ')
-                self.fileobj.write(headers[name])
+                self.fileobj.write(value.decode()
+                                   if isinstance(value, bytes) 
+                                   else value)
                 self.fileobj.write(CRLF)
         self.fileobj.write(CRLF)
 

@@ -88,7 +88,7 @@ def use(module=None, decode=None, encode=None):
     """
     global _decode, _encode, _initialized, _using
     if module is not None:
-        if not isinstance(module, basestring):
+        if not isinstance(module, str):
             module = module.__name__
         if module not in ('cjson', 'json', 'simplejson'):
             raise ValueError('Unsupported JSON module %s' % module)
@@ -120,7 +120,8 @@ def _initialize():
 
     def _init_stdlib():
         global _decode, _encode
-        json = __import__('json', {}, {})
+        from couchdb.utils import import_stdlib
+        json = import_stdlib('json')
         _decode = lambda string, loads=json.loads: loads(string)
         _encode = lambda obj, dumps=json.dumps: \
             dumps(obj, allow_nan=False, ensure_ascii=False)

@@ -75,7 +75,7 @@ class Server(object):
         :param full_commit: turn on the X-Couch-Full-Commit header
         :param session: an http.Session instance or None for a default session
         """
-        if isinstance(url, basestring):
+        if isinstance(url, str):
             self.resource = http.Resource(url, session or http.Session())
         else:
             self.resource = url # treat as a Resource object
@@ -105,7 +105,7 @@ class Server(object):
         status, headers, data = self.resource.get_json('_all_dbs')
         return len(data)
 
-    def __nonzero__(self):
+    def __bool__(self):
         """Return whether the server is available."""
         try:
             self.resource.head()
@@ -263,7 +263,7 @@ class Database(object):
     """
 
     def __init__(self, url, name=None, session=None):
-        if isinstance(url, basestring):
+        if isinstance(url, str):
             if not url.startswith('http'):
                 url = DEFAULT_BASE_URL + url
             self.resource = http.Resource(url, session)
@@ -296,7 +296,7 @@ class Database(object):
         _, _, data = self.resource.get_json()
         return data['doc_count']
 
-    def __nonzero__(self):
+    def __bool__(self):
         """Return whether the database is available."""
         try:
             self.resource.head()
@@ -453,19 +453,19 @@ class Database(object):
         :rtype: `str`
         :since: 0.6
         """
-        if not isinstance(src, basestring):
+        if not isinstance(src, str):
             if not isinstance(src, dict):
                 if hasattr(src, 'items'):
-                    src = dict(src.items())
+                    src = dict(list(src.items()))
                 else:
                     raise TypeError('expected dict or string, got %s' %
                                     type(src))
             src = src['_id']
 
-        if not isinstance(dest, basestring):
+        if not isinstance(dest, str):
             if not isinstance(dest, dict):
                 if hasattr(dest, 'items'):
-                    dest = dict(dest.items())
+                    dest = dict(list(dest.items()))
                 else:
                     raise TypeError('expected dict or string, got %s' %
                                     type(dest))
@@ -593,7 +593,7 @@ class Database(object):
                  of the `default` argument if the attachment is not found
         :since: 0.4.1
         """
-        if isinstance(id_or_doc, basestring):
+        if isinstance(id_or_doc, str):
             id = id_or_doc
         else:
             id = id_or_doc['_id']
@@ -629,13 +629,15 @@ class Database(object):
                 raise ValueError('no filename specified for attachment')
         if content_type is None:
             content_type = ';'.join(
-                filter(None, mimetypes.guess_type(filename))
+                [_f for _f in mimetypes.guess_type(filename) if _f]
             )
 
         resource = self.resource(doc['_id'])
-        status, headers, data = resource.put_json(filename, body=content, headers={
-            'Content-Type': content_type
-        }, rev=doc['_rev'])
+        status, headers, data = resource.put_json(filename, 
+                                                  body=content, 
+                                                  headers={'Content-Type': 
+                                                           content_type}, 
+                                                  rev=doc['_rev'])
         doc['_rev'] = data['rev']
 
     def query(self, map_fun, reduce_fun=None, language='javascript',
@@ -652,17 +654,17 @@ class Database(object):
         ...         emit(doc.name, null);
         ... }'''
         >>> for row in db.query(map_fun):
-        ...     print row.key
+        ...     print(row.key)
         John Doe
         Mary Jane
 
         >>> for row in db.query(map_fun, descending=True):
-        ...     print row.key
+        ...     print(row.key)
         Mary Jane
         John Doe
 
         >>> for row in db.query(map_fun, key='John Doe'):
-        ...     print row.key
+        ...     print(row.key)
         John Doe
 
         >>> del server['python-tests']
@@ -692,7 +694,7 @@ class Database(object):
         ...     Document(type='Person', name='Mary Jane'),
         ...     Document(type='City', name='Gotham City')
         ... ]):
-        ...     print repr(doc) #doctest: +ELLIPSIS
+        ...     print(repr(doc)) #doctest: +ELLIPSIS
         (True, '...', '...')
         (True, '...', '...')
         (True, '...', '...')
@@ -724,7 +726,7 @@ class Database(object):
             if isinstance(doc, dict):
                 docs.append(doc)
             elif hasattr(doc, 'items'):
-                docs.append(dict(doc.items()))
+                docs.append(dict(list(doc.items())))
             else:
                 raise TypeError('expected dict, got %s' % type(doc))
 
@@ -758,7 +760,7 @@ class Database(object):
         >>> db['gotham'] = dict(type='City', name='Gotham City')
 
         >>> for row in db.view('_all_docs'):
-        ...     print row.id
+        ...     print(row.id)
         gotham
 
         >>> del server['python-tests']
@@ -785,7 +787,7 @@ class Database(object):
         for ln in lines:
             if not ln: # skip heartbeats
                 continue
-            doc = json.decode(ln)
+            doc = json.decode(ln.decode('utf-8'))
             if 'last_seq' in doc: # consume the rest of the response if this
                 for ln in lines:  # was the last line, allows conn reuse
                     pass
@@ -811,7 +813,7 @@ class Document(dict):
 
     def __repr__(self):
         return '<%s %r@%r %r>' % (type(self).__name__, self.id, self.rev,
-                                  dict([(k,v) for k,v in self.items()
+                                  dict([(k,v) for k,v in list(self.items())
                                         if k not in ('_id', '_rev')]))
 
     @property
@@ -835,7 +837,7 @@ class View(object):
     """Abstract representation of a view or query."""
 
     def __init__(self, url, wrapper=None, session=None):
-        if isinstance(url, basestring):
+        if isinstance(url, str):
             self.resource = http.Resource(url, session)
         else:
             self.resource = url
@@ -849,9 +851,9 @@ class View(object):
 
     def _encode_options(self, options):
         retval = {}
-        for name, value in options.items():
+        for name, value in list(options.items()):
             if name in ('key', 'startkey', 'endkey') \
-                    or not isinstance(value, basestring):
+                    or not isinstance(value, str):
                 value = json.encode(value)
             retval[name] = value
         return retval
@@ -944,7 +946,7 @@ class ViewResults(object):
 
     >>> people = results[['Person']:['Person','ZZZZ']]
     >>> for person in people:
-    ...     print person.value
+    ...     print(person.value)
     John Doe
     Mary Jane
     >>> people.total_rows, people.offset

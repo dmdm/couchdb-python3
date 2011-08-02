@@ -9,6 +9,7 @@
 import random
 import sys
 from couchdb import client
+from couchdb import ServerError
 
 class TempDatabaseMixin(object):
 
@@ -21,17 +22,22 @@ class TempDatabaseMixin(object):
     def tearDown(self):
         if self.temp_dbs:
             for name in self.temp_dbs:
-                self.server.delete(name)
+                try:
+                    self.server.delete(name)
+                except ServerError as err:
+                    if err.args[0] == (500, ('error', 'eacces')):
+                        continue
+                    raise
 
     def temp_db(self):
         if self.temp_dbs is None:
             self.temp_dbs = {}
         # Find an unused database name
         while True:
-            name = 'couchdb-python/%d' % random.randint(0, sys.maxint)
+            name = 'couchdb-python/%d' % random.randint(0, sys.maxsize)
             if name not in self.temp_dbs:
                 break
-            print '%s already used' % name
+            print('%s already used' % name)
         db = self.server.create(name)
         self.temp_dbs[name] = db
         return name, db

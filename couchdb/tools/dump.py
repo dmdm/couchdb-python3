@@ -31,7 +31,7 @@ def dump_db(dburl, username=None, password=None, boundary=None,
     for docid in db:
 
         doc = db.get(docid, attachments=True)
-        print >> sys.stderr, 'Dumping document %r' % doc.id
+        print('Dumping document %r' % doc.id, file=sys.stderr)
         attachments = doc.pop('_attachments', {})
         jsondoc = json.encode(doc)
 
@@ -42,7 +42,7 @@ def dump_db(dburl, username=None, password=None, boundary=None,
             })
             parts.add('application/json', jsondoc)
 
-            for name, info in attachments.items():
+            for name, info in list(attachments.items()):
                 content_type = info.get('content_type')
                 if content_type is None: # CouchDB < 0.8
                     content_type = info.get('content-type')

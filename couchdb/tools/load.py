@@ -45,13 +45,13 @@ def load_db(fileobj, dburl, username=None, password=None, ignore_errors=False):
             doc = json.decode(payload)
 
         del doc['_rev']
-        print>>sys.stderr, 'Loading document %r' % docid
+        print('Loading document %r' % docid, file=sys.stderr)
         try:
             db[docid] = doc
-        except Exception, e:
+        except Exception as e:
             if not ignore_errors:
                 raise
-            print>>sys.stderr, 'Error: %s' % e
+            print('Error: %s' % e, file=sys.stderr)
 
 
 def main():

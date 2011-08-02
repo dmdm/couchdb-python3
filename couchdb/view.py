@@ -34,14 +34,12 @@ def run(input=sys.stdin, output=sys.stdout):
 
     def _writejson(obj):
         obj = json.encode(obj)
-        if isinstance(obj, unicode):
-            obj = obj.encode('utf-8')
         output.write(obj)
         output.write('\n')
         output.flush()
 
     def _log(message):
-        if not isinstance(message, basestring):
+        if not isinstance(message, str):
             message = json.encode(message)
         _writejson({'log': message})
 
@@ -53,8 +51,8 @@ def run(input=sys.stdin, output=sys.stdout):
         string = BOM_UTF8 + string.encode('utf-8')
         globals_ = {}
         try:
-            exec string in {'log': _log}, globals_
-        except Exception, e:
+            exec(string, {'log': _log}, globals_)
+        except Exception as e:
             return {'error': {
                 'id': 'map_compilation_error',
                 'reason': e.args[0]
@@ -66,7 +64,7 @@ def run(input=sys.stdin, output=sys.stdout):
         }}
         if len(globals_) != 1:
             return err
-        function = globals_.values()[0]
+        function = list(globals_.values())[0]
         if type(function) is not FunctionType:
             return err
         functions.append(function)
@@ -77,7 +75,7 @@ def run(input=sys.stdin, output=sys.stdout):
         for function in functions:
             try:
                 results.append([[key, value] for key, value in function(doc)])
-            except Exception, e:
+            except Exception as e:
                 log.error('runtime error in map function: %s', e,
                           exc_info=True)
                 results.append([])
@@ -89,8 +87,8 @@ def run(input=sys.stdin, output=sys.stdout):
         args = cmd[1]
         globals_ = {}
         try:
-            exec code in {'log': _log}, globals_
-        except Exception, e:
+            exec(code, {'log': _log}, globals_)
+        except Exception as e:
             log.error('runtime error in reduce function: %s', e,
                       exc_info=True)
             return {'error': {
@@ -104,7 +102,7 @@ def run(input=sys.stdin, output=sys.stdout):
         }}
         if len(globals_) != 1:
             return err
-        function = globals_.values()[0]
+        function = list(globals_.values())[0]
         if type(function) is not FunctionType:
             return err
 
@@ -114,8 +112,8 @@ def run(input=sys.stdin, output=sys.stdout):
             keys = None
             vals = args
         else:
-            keys, vals = zip(*args)
-        if function.func_code.co_argcount == 3:
+            keys, vals = list(zip(*args))
+        if function.__code__.co_argcount == 3:
             results = function(keys, vals, rereduce)
         else:
             results = function(keys, vals)
@@ -136,7 +134,7 @@ def run(input=sys.stdin, output=sys.stdout):
             try:
                 cmd = json.decode(line)
                 log.debug('Processing %r', cmd)
-            except ValueError, e:
+            except ValueError as e:
                 log.error('Error: %s', e, exc_info=True)
                 return 1
             else:
@@ -145,7 +143,7 @@ def run(input=sys.stdin, output=sys.stdout):
                 _writejson(retval)
     except KeyboardInterrupt:
         return 0
-    except Exception, e:
+    except Exception as e:
         log.error('Error: %s', e, exc_info=True)
         return 1
 
@@ -215,7 +213,7 @@ def main():
             sys.stdout.flush()
             sys.exit(0)
 
-    except getopt.GetoptError, error:
+    except getopt.GetoptError as error:
         message = '%s\n\nTry `%s --help` for more information.\n' % (
             str(error), os.path.basename(sys.argv[0])
         )

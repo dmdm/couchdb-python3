@@ -10,12 +10,12 @@ import doctest
 import os
 import os.path
 import shutil
-from StringIO import StringIO
+from io import StringIO
 import time
 import tempfile
 import threading
 import unittest
-import urlparse
+import urllib.parse
 
 from couchdb import client, http
 from couchdb.tests import testutil
@@ -45,7 +45,7 @@ class ServerTestCase(testutil.TempDatabaseMixin, unittest.TestCase):
 
     def test_server_vars(self):
         version = self.server.version()
-        self.assertTrue(isinstance(version, basestring))
+        self.assertTrue(isinstance(version, str))
         config = self.server.config()
         self.assertTrue(isinstance(config, dict))
         stats = self.server.stats()
@@ -179,13 +179,13 @@ class DatabaseTestCase(testutil.TempDatabaseMixin, unittest.TestCase):
         self.assertEqual(None, self.db.get('foo/bar'))
 
     def test_unicode(self):
-        self.db[u'føø'] = {u'bår': u'Iñtërnâtiônàlizætiøn', 'baz': 'ASCII'}
-        self.assertEqual(u'Iñtërnâtiônàlizætiøn', self.db[u'føø'][u'bår'])
-        self.assertEqual(u'ASCII', self.db[u'føø'][u'baz'])
+        self.db['føø'] = {'bår': 'Iñtërnâtiônàlizætiøn', 'baz': 'ASCII'}
+        self.assertEqual('Iñtërnâtiônàlizætiøn', self.db['føø']['bår'])
+        self.assertEqual('ASCII', self.db['føø']['baz'])
 
     def test_disallow_nan(self):
         try:
-            self.db['foo'] = {u'number': float('nan')}
+            self.db['foo'] = {'number': float('nan')}
             self.fail('Expected ValueError')
         except ValueError:
             pass
@@ -213,7 +213,7 @@ class DatabaseTestCase(testutil.TempDatabaseMixin, unittest.TestCase):
         self.assertEqual(revs[0]['_rev'], new_rev)
         self.assertEqual(revs[1]['_rev'], old_rev)
         gen = self.db.revisions('crap')
-        self.assertRaises(StopIteration, lambda: gen.next())
+        self.assertRaises(StopIteration, lambda: next(gen))
 
         self.assertTrue(self.db.compact())
         while self.db.info()['compact_running']:
@@ -332,9 +332,9 @@ class DatabaseTestCase(testutil.TempDatabaseMixin, unittest.TestCase):
         for i in range(1, 6):
             self.db.save({'i': i})
         res = list(self.db.query('function(doc) { emit(doc.i, null); }',
-                                 keys=range(1, 6, 2)))
+                                 keys=list(range(1, 6, 2))))
         self.assertEqual(3, len(res))
-        for idx, i in enumerate(range(1, 6, 2)):
+        for idx, i in enumerate(list(range(1, 6, 2))):
             self.assertEqual(i, res[idx].key)
 
     def test_bulk_update_conflict(self):
@@ -410,7 +410,7 @@ class DatabaseTestCase(testutil.TempDatabaseMixin, unittest.TestCase):
             def __init__(self, doc):
                 self.doc = doc
             def items(self):
-                return self.doc.items()
+                return list(self.doc.items())
         self.db['foo'] = {'status': 'testing'}
         self.db.copy(DictLike(self.db['foo']), 'bar')
         self.assertEqual('testing', self.db['bar']['status'])
@@ -420,7 +420,7 @@ class DatabaseTestCase(testutil.TempDatabaseMixin, unittest.TestCase):
             def __init__(self, doc):
                 self.doc = doc
             def items(self):
-                return self.doc.items()
+                return list(self.doc.items())
         self.db['foo'] = {'status': 'testing'}
         self.db['bar'] = {}
         self.db.copy('foo', DictLike(self.db['bar']))
@@ -435,7 +435,7 @@ class DatabaseTestCase(testutil.TempDatabaseMixin, unittest.TestCase):
     def test_changes(self):
         self.db['foo'] = {'bar': True}
         self.assertEqual(self.db.changes(since=0)['last_seq'], 1)
-        first = self.db.changes(feed='continuous').next()
+        first = next(self.db.changes(feed='continuous'))
         self.assertEqual(first['seq'], 1)
         self.assertEqual(first['id'], 'foo')
 
@@ -443,7 +443,7 @@ class DatabaseTestCase(testutil.TempDatabaseMixin, unittest.TestCase):
         # Consume an entire changes feed to read the whole response, then check
         # that the HTTP connection made it to the pool.
         list(self.db.changes(feed='continuous', timeout=0))
-        scheme, netloc = urlparse.urlsplit(client.DEFAULT_BASE_URL)[:2]
+        scheme, netloc = urllib.parse.urlsplit(client.DEFAULT_BASE_URL)[:2]
         self.assertTrue(self.db.resource.session.conns[(scheme, netloc)])
 
     def test_changes_releases_conn_when_lastseq(self):
@@ -453,7 +453,7 @@ class DatabaseTestCase(testutil.TempDatabaseMixin, unittest.TestCase):
         for obj in self.db.changes(feed='continuous', timeout=0):
             if 'last_seq' in obj:
                 break
-        scheme, netloc = urlparse.urlsplit(client.DEFAULT_BASE_URL)[:2]
+        scheme, netloc = urllib.parse.urlsplit(client.DEFAULT_BASE_URL)[:2]
         self.assertTrue(self.db.resource.session.conns[(scheme, netloc)])
 
     def test_changes_conn_usable(self):
@@ -484,9 +484,9 @@ class ViewTestCase(testutil.TempDatabaseMixin, unittest.TestCase):
             }
         }
 
-        res = list(self.db.view('test/multi_key', keys=range(1, 6, 2)))
+        res = list(self.db.view('test/multi_key', keys=list(range(1, 6, 2))))
         self.assertEqual(3, len(res))
-        for idx, i in enumerate(range(1, 6, 2)):
+        for idx, i in enumerate(list(range(1, 6, 2))):
             self.assertEqual(i, res[idx].key)
 
     def test_view_compaction(self):
@@ -513,7 +513,7 @@ class ViewTestCase(testutil.TempDatabaseMixin, unittest.TestCase):
             yield doc['i'], doc['j']
         res = list(self.db.query(map_fun, language='python'))
         self.assertEqual(3, len(res))
-        for idx, i in enumerate(range(1,4)):
+        for idx, i in enumerate(list(range(1,4))):
             self.assertEqual(i, res[idx].key)
             self.assertEqual(2*i, res[idx].value)
 
