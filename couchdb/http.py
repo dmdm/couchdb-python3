@@ -37,6 +37,54 @@ __all__ = ['HTTPError', 'PreconditionFailed', 'ResourceNotFound',
 __docformat__ = 'restructuredtext en'
 
 
+if sys.version < '2.6':
+
+    class TimeoutMixin:
+        """Helper mixin to add timeout before socket connection"""
+
+        # taken from original python2.5 httplib source code with timeout setting added
+        def connect(self):
+            """Connect to the host and port specified in __init__."""
+            msg = "getaddrinfo returns an empty list"
+            for res in socket.getaddrinfo(self.host, self.port, 0,
+                                          socket.SOCK_STREAM):
+                af, socktype, proto, canonname, sa = res
+                try:
+                    self.sock = socket.socket(af, socktype, proto)
+                    if self.debuglevel > 0:
+                        print "connect: (%s, %s)" % (self.host, self.port)
+
+                    # setting socket timeout
+                    self.sock.settimeout(self.timeout)
+
+                    self.sock.connect(sa)
+                except socket.error, msg:
+                    if self.debuglevel > 0:
+                        print 'connect fail:', (self.host, self.port)
+                    if self.sock:
+                        self.sock.close()
+                    self.sock = None
+                    continue
+                break
+            if not self.sock:
+                raise socket.error, msg
+
+    _HTTPConnection = HTTPConnection
+    _HTTPSConnection = HTTPSConnection
+
+    class HTTPConnection(TimeoutMixin, _HTTPConnection):
+        def __init__(self, *a, **k):
+            timeout = k.pop('timeout', None)
+            _HTTPConnection.__init__(self, *a, **k)
+            self.timeout = timeout
+
+    class HTTPSConnection(TimeoutMixin, _HTTPSConnection):
+        def __init__(self, *a, **k):
+            timeout = k.pop('timeout', None)
+            _HTTPSConnection.__init__(self, *a, **k)
+            self.timeout = timeout
+
+
 class HTTPError(Exception):
     """Base class for errors based on HTTP status codes >= 400."""
 
@@ -98,12 +146,16 @@ class ResponseBody(object):
 
     def close(self):
         while not self.resp.isclosed():
-            self.read(CHUNK_SIZE)
-        self.callback()
+            self.resp.read(CHUNK_SIZE)
+        if self.callback:
+            self.callback()
+            self.callback = None
 
     def __iter__(self):
         assert self.resp.msg.get('transfer-encoding') == 'chunked'
         while True:
+            if self.resp.isclosed():
+                break
             chunksz = int(self.resp.fp.readline().strip(), 16)
             if not chunksz:
                 self.resp.fp.read(2) #crlf
@@ -133,7 +185,7 @@ class Session(object):
         :param cache: an instance with a dict-like interface or None to allow
                       Session to create a dict for caching.
         :param timeout: socket timeout in number of seconds, or `None` for no
-                        timeout
+                        timeout (the default)
         :param retry_delays: list of request retry delays.
         """
         from couchdb import __version__ as VERSION
@@ -175,7 +227,10 @@ class Session(object):
                 try:
                     body = json.encode(body).encode('utf-8')
                 except TypeError:
-                    pass
+                    # Check for somethine file-like or re-raise the exception
+                    # to avoid masking real JSON encoding errors.
+                    if not hasattr(body, 'read'):
+                        raise
                 else:
                     headers.setdefault('Content-Type', 'application/json')
             if isinstance(body, basestring):
@@ -208,23 +263,20 @@ class Session(object):
 
         def _try_request():
             try:
-                if conn.sock is None:
-                    conn.connect()
                 conn.putrequest(method, path_query, skip_accept_encoding=True)
                 for header in headers:
                     conn.putheader(header, headers[header])
                 conn.endheaders()
                 if body is not None:
                     if isinstance(body, str):
-                        conn.sock.sendall(body)
+                        conn.send(body)
                     else: # assume a file-like object and send in chunks
                         while 1:
                             chunk = body.read(CHUNK_SIZE)
                             if not chunk:
                                 break
-                            conn.sock.sendall(('%x\r\n' % len(chunk)) +
-                                              chunk + '\r\n')
-                        conn.sock.sendall('0\r\n\r\n')
+                            conn.send(('%x\r\n' % len(chunk)) + chunk + '\r\n')
+                        conn.send('0\r\n\r\n')
                 return conn.getresponse()
             except BadStatusLine, e:
                 # httplib raises a BadStatusLine when it cannot read the status
@@ -338,7 +390,8 @@ class Session(object):
                     cls = HTTPSConnection
                 else:
                     raise ValueError('%s is not a supported scheme' % scheme)
-                conn = cls(host)
+                conn = cls(host, timeout=self.timeout)
+                conn.connect()
         finally:
             self.lock.release()
         return conn
