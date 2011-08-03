@@ -10,7 +10,7 @@ import doctest
 import socket
 import time
 import unittest
-from StringIO import StringIO
+from io import BytesIO
 
 from couchdb import http
 from couchdb.tests import testutil
@@ -30,9 +30,9 @@ class SessionTestCase(testutil.TempDatabaseMixin, unittest.TestCase):
 
 class ResponseBodyTestCase(unittest.TestCase):
     def test_close(self):
-        class TestStream(StringIO):
+        class TestStream(BytesIO):
             def isclosed(self):
-                return len(self.buf) == self.tell()
+                return len(self.getvalue()) == self.tell()
 
         class Counter(object):
             def __init__(self):
@@ -43,7 +43,7 @@ class ResponseBodyTestCase(unittest.TestCase):
 
         counter = Counter()
 
-        response = http.ResponseBody(TestStream('foobar'), counter)
+        response = http.ResponseBody(TestStream(b'foobar'), counter)
 
         response.read(10) # read more than stream has. close() is called
         response.read() # steam ended. another close() call
@@ -57,13 +57,13 @@ class ResponseBodyTestCase(unittest.TestCase):
                 self.fp = fp
 
             def isclosed(self):
-                return len(self.fp.buf) == self.fp.tell()
+                return len(self.fp.getvalue()) == self.fp.tell()
 
-        data = 'foobarbaz'
-        data = '\n'.join([hex(len(data))[2:], data])
-        response = http.ResponseBody(TestHttpResp(StringIO(data)),
+        data = b'foobarbaz'
+        data = b'\n'.join([hex(len(data))[2:].encode(), data])
+        response = http.ResponseBody(TestHttpResp(BytesIO(data)),
                                      lambda *a, **k: None)
-        self.assertEqual(list(response), ['foobarbaz'])
+        self.assertEqual(list(response), [b'foobarbaz'])
         self.assertEqual(list(response), [])
 
 

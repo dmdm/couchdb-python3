@@ -224,7 +224,7 @@ class Session(object):
                     elif isinstance(body, bytes):
                         conn.send(body)
                     else: # assume a file-like object and send in chunks
-                        while 1:
+                        while True:
                             chunk = body.read(CHUNK_SIZE)
                             encoding = getattr(body, 'encoding') or 'utf-8'
                             if not chunk:

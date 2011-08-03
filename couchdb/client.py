@@ -521,7 +521,7 @@ class Database(object):
         >>> db.delete(doc)
         Traceback (most recent call last):
           ...
-        ResourceConflict: ('conflict', 'Document update conflict.')
+        couchdb.http.ResourceConflict: ('conflict', 'Document update conflict.')
 
         >>> del server['python-tests']
 
@@ -1027,7 +1027,7 @@ def _encode_view_options(options):
     retval = {}
     for name, value in options.items():
         if name in ('key', 'startkey', 'endkey') \
-                or not isinstance(value, basestring):
+                or not isinstance(value, str):
             value = json.encode(value)
         retval[name] = value
     return retval

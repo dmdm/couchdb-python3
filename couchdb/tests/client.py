@@ -501,7 +501,7 @@ class ViewTestCase(testutil.TempDatabaseMixin, unittest.TestCase):
         row = list(self.db.view('_all_docs', keys=['xyz']))[0]
         self.assertEqual(row.id, 'xyz')
         self.assertEqual(row.key, 'xyz')
-        self.assertEqual(row.value.keys(), ['rev'])
+        self.assertEqual(list(row.value.keys()), ['rev'])
         self.assertEqual(row.error, None)
 
     def test_view_multi_get(self):
